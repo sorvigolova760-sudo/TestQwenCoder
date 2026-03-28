@@ -1,0 +1,583 @@
+// Stick War Clone - Game Logic
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game state
+let gold = 100;
+let baseHealth = 1000;
+let enemyBaseHealth = 1000;
+let kills = 0;
+let gameRunning = true;
+let lastTime = 0;
+
+// Unit types configuration
+const unitTypes = {
+    miner: { 
+        cost: 50, 
+        health: 30, 
+        damage: 5, 
+        speed: 60, 
+        attackRange: 30, 
+        attackCooldown: 1000,
+        color: '#FFD700',
+        width: 20,
+        height: 40,
+        isWorker: true
+    },
+    swordman: { 
+        cost: 100, 
+        health: 80, 
+        damage: 15, 
+        speed: 50, 
+        attackRange: 40, 
+        attackCooldown: 800,
+        color: '#4169E1',
+        width: 25,
+        height: 50,
+        isWorker: false
+    },
+    archer: { 
+        cost: 150, 
+        health: 50, 
+        damage: 12, 
+        speed: 45, 
+        attackRange: 200, 
+        attackCooldown: 1200,
+        color: '#32CD32',
+        width: 22,
+        height: 45,
+        isWorker: false,
+        isRanged: true
+    },
+    giant: { 
+        cost: 300, 
+        health: 200, 
+        damage: 30, 
+        speed: 30, 
+        attackRange: 50, 
+        attackCooldown: 1500,
+        color: '#8B4513',
+        width: 40,
+        height: 70,
+        isWorker: false
+    }
+};
+
+// Arrays to store game objects
+let playerUnits = [];
+let enemyUnits = [];
+let projectiles = [];
+let goldMines = [];
+
+// Base positions
+const playerBaseX = 100;
+const enemyBaseX = canvas.width - 100;
+const groundY = canvas.height / 2 + 50;
+
+// Initialize gold mines
+function initMines() {
+    goldMines = [
+        { x: canvas.width / 2 - 50, y: groundY, health: 500, maxHealth: 500 },
+        { x: canvas.width / 2 + 50, y: groundY, health: 500, maxHealth: 500 }
+    ];
+}
+
+// Unit class
+class Unit {
+    constructor(type, isPlayer) {
+        const config = unitTypes[type];
+        this.type = type;
+        this.isPlayer = isPlayer;
+        this.x = isPlayer ? playerBaseX : enemyBaseX;
+        this.y = groundY;
+        this.health = config.health;
+        this.maxHealth = config.health;
+        this.damage = config.damage;
+        this.speed = config.speed;
+        this.attackRange = config.attackRange;
+        this.attackCooldown = config.attackCooldown;
+        this.lastAttack = 0;
+        this.color = config.color;
+        this.width = config.width;
+        this.height = config.height;
+        this.isWorker = config.isWorker;
+        this.isRanged = config.isRanged || false;
+        this.target = null;
+        this.state = 'move'; // move, attack, mine
+        this.miningTarget = null;
+    }
+    
+    update(deltaTime, currentTime) {
+        if (this.health <= 0) return;
+        
+        // Find target
+        this.findTarget();
+        
+        if (this.state === 'mine' && this.isWorker && this.miningTarget) {
+            this.mine(currentTime);
+        } else if (this.target && this.target.health > 0) {
+            const distance = Math.abs(this.x - this.target.x);
+            
+            if (distance <= this.attackRange) {
+                this.state = 'attack';
+                this.attack(currentTime);
+            } else {
+                this.state = 'move';
+                this.move(deltaTime);
+            }
+        } else {
+            this.state = 'move';
+            this.move(deltaTime);
+        }
+    }
+    
+    findTarget() {
+        if (this.isPlayer) {
+            // Target enemy units or enemy base
+            let closestEnemy = null;
+            let closestDist = Infinity;
+            
+            for (const enemy of enemyUnits) {
+                if (enemy.health > 0) {
+                    const dist = Math.abs(this.x - enemy.x);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestEnemy = enemy;
+                    }
+                }
+            }
+            
+            // Also consider enemy base
+            const baseDist = Math.abs(this.x - enemyBaseX);
+            if (baseDist < closestDist && baseDist < 400) {
+                this.target = { x: enemyBaseX, y: groundY, health: enemyBaseHealth, isBase: true };
+            } else if (closestEnemy) {
+                this.target = closestEnemy;
+            } else {
+                this.target = { x: enemyBaseX, y: groundY, health: enemyBaseHealth, isBase: true };
+            }
+        } else {
+            // Target player units or player base
+            let closestEnemy = null;
+            let closestDist = Infinity;
+            
+            for (const player of playerUnits) {
+                if (player.health > 0) {
+                    const dist = Math.abs(this.x - player.x);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestEnemy = player;
+                    }
+                }
+            }
+            
+            // Also consider player base
+            const baseDist = Math.abs(this.x - playerBaseX);
+            if (baseDist < closestDist && baseDist < 400) {
+                this.target = { x: playerBaseX, y: groundY, health: baseHealth, isBase: true };
+            } else if (closestEnemy) {
+                this.target = closestEnemy;
+            } else {
+                this.target = { x: playerBaseX, y: groundY, health: baseHealth, isBase: true };
+            }
+        }
+    }
+    
+    move(deltaTime) {
+        const direction = this.isPlayer ? 1 : -1;
+        this.x += this.speed * direction * deltaTime;
+        
+        // Clamp position
+        if (this.isPlayer) {
+            this.x = Math.max(playerBaseX + 50, Math.min(canvas.width - 50, this.x));
+        } else {
+            this.x = Math.max(50, Math.min(enemyBaseX - 50, this.x));
+        }
+    }
+    
+    attack(currentTime) {
+        if (currentTime - this.lastAttack >= this.attackCooldown) {
+            this.lastAttack = currentTime;
+            
+            if (this.target.isBase) {
+                if (this.isPlayer) {
+                    enemyBaseHealth -= this.damage;
+                } else {
+                    baseHealth -= this.damage;
+                }
+            } else if (this.target.health > 0) {
+                this.target.health -= this.damage;
+                if (this.target.health <= 0 && !this.target.isBase) {
+                    if (this.isPlayer) {
+                        kills++;
+                    }
+                }
+            }
+        }
+    }
+    
+    mine(currentTime) {
+        if (!this.miningTarget || this.miningTarget.health <= 0) {
+            this.state = 'move';
+            this.miningTarget = null;
+            return;
+        }
+        
+        const distance = Math.abs(this.x - this.miningTarget.x);
+        if (distance <= 50) {
+            if (currentTime - this.lastAttack >= this.attackCooldown) {
+                this.lastAttack = currentTime;
+                this.miningTarget.health -= this.damage;
+                
+                if (this.miningTarget.health <= 0) {
+                    gold += 25;
+                    this.miningTarget = null;
+                    this.state = 'move';
+                }
+            }
+        } else {
+            const direction = this.miningTarget.x > this.x ? 1 : -1;
+            this.x += this.speed * direction * 0.016;
+        }
+    }
+    
+    draw() {
+        if (this.health <= 0) return;
+        
+        ctx.save();
+        
+        // Draw stick figure
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 3;
+        ctx.fillStyle = this.color;
+        
+        const x = this.x;
+        const y = this.y;
+        
+        // Head
+        ctx.beginPath();
+        ctx.arc(x, y - this.height/2 + 5, 8, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Body
+        ctx.beginPath();
+        ctx.moveTo(x, y - this.height/2 + 13);
+        ctx.lineTo(x, y - this.height/4);
+        ctx.stroke();
+        
+        // Arms
+        ctx.beginPath();
+        if (this.state === 'attack') {
+            // Attack pose
+            ctx.moveTo(x, y - this.height/3);
+            ctx.lineTo(x + (this.isPlayer ? 15 : -15), y - this.height/3);
+        } else {
+            // Normal pose
+            ctx.moveTo(x - 10, y - this.height/3);
+            ctx.lineTo(x + 10, y - this.height/3);
+        }
+        ctx.stroke();
+        
+        // Legs
+        ctx.beginPath();
+        ctx.moveTo(x, y - this.height/4);
+        ctx.lineTo(x - 8, y);
+        ctx.moveTo(x, y - this.height/4);
+        ctx.lineTo(x + 8, y);
+        ctx.stroke();
+        
+        // Weapon
+        if (this.type === 'swordman') {
+            ctx.beginPath();
+            ctx.strokeStyle = '#C0C0C0';
+            ctx.lineWidth = 4;
+            if (this.isPlayer) {
+                ctx.moveTo(x + 10, y - this.height/3);
+                ctx.lineTo(x + 25, y - this.height/2);
+            } else {
+                ctx.moveTo(x - 10, y - this.height/3);
+                ctx.lineTo(x - 25, y - this.height/2);
+            }
+            ctx.stroke();
+        } else if (this.type === 'archer') {
+            ctx.beginPath();
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 2;
+            ctx.arc(x + (this.isPlayer ? 15 : -15), y - this.height/2, 15, -Math.PI/4, Math.PI/4, !this.isPlayer);
+            ctx.stroke();
+        } else if (this.type === 'miner') {
+            ctx.beginPath();
+            ctx.strokeStyle = '#FFA500';
+            ctx.lineWidth = 3;
+            if (this.isPlayer) {
+                ctx.moveTo(x + 10, y - this.height/3);
+                ctx.lineTo(x + 20, y - this.height/2 - 5);
+            } else {
+                ctx.moveTo(x - 10, y - this.height/3);
+                ctx.lineTo(x - 20, y - this.height/2 - 5);
+            }
+            ctx.stroke();
+        }
+        
+        // Health bar
+        const healthBarWidth = 40;
+        const healthPercent = this.health / this.maxHealth;
+        ctx.fillStyle = '#FF0000';
+        ctx.fillRect(x - healthBarWidth/2, y - this.height/2 - 15, healthBarWidth, 5);
+        ctx.fillStyle = '#00FF00';
+        ctx.fillRect(x - healthBarWidth/2, y - this.height/2 - 15, healthBarWidth * healthPercent, 5);
+        
+        ctx.restore();
+    }
+}
+
+// Projectile class for ranged attacks
+class Projectile {
+    constructor(x, y, targetX, targetY, damage) {
+        this.x = x;
+        this.y = y;
+        this.targetX = targetX;
+        this.targetY = targetY;
+        this.damage = damage;
+        this.speed = 300;
+        this.active = true;
+        
+        const dx = targetX - x;
+        const dy = targetY - y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        this.vx = (dx / dist) * this.speed;
+        this.vy = (dy / dist) * this.speed;
+    }
+    
+    update(deltaTime) {
+        this.x += this.vx * deltaTime;
+        this.y += this.vy * deltaTime;
+        
+        // Check if reached target area
+        const dist = Math.sqrt(Math.pow(this.x - this.targetX, 2) + Math.pow(this.y - this.targetY, 2));
+        if (dist < 20) {
+            this.active = false;
+            // Hit enemy units in area
+            for (const unit of this.isPlayer ? enemyUnits : playerUnits) {
+                if (unit.health > 0) {
+                    const unitDist = Math.sqrt(Math.pow(this.x - unit.x, 2) + Math.pow(this.y - unit.y, 2));
+                    if (unitDist < 30) {
+                        unit.health -= this.damage;
+                        if (unit.health <= 0 && this.isPlayer) {
+                            kills++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    draw() {
+        if (!this.active) return;
+        
+        ctx.beginPath();
+        ctx.fillStyle = '#FFD700';
+        ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// Spawn unit function
+function spawnUnit(type) {
+    if (!gameRunning) return;
+    
+    const cost = unitTypes[type].cost;
+    if (gold >= cost) {
+        gold -= cost;
+        playerUnits.push(new Unit(type, true));
+        updateUI();
+    }
+}
+
+// Enemy spawn logic
+let enemySpawnTimer = 0;
+let enemySpawnInterval = 5000;
+
+function spawnEnemy() {
+    const types = ['swordman', 'archer', 'giant'];
+    const randomType = types[Math.floor(Math.random() * types.length)];
+    enemyUnits.push(new Unit(randomType, false));
+}
+
+// Update UI
+function updateUI() {
+    document.getElementById('gold').textContent = Math.floor(gold);
+    document.getElementById('baseHealth').textContent = Math.floor(baseHealth);
+    document.getElementById('kills').textContent = kills;
+    
+    // Update button states
+    const buttons = document.querySelectorAll('.unit-btn');
+    buttons[0].disabled = gold < unitTypes.miner.cost;
+    buttons[1].disabled = gold < unitTypes.swordman.cost;
+    buttons[2].disabled = gold < unitTypes.archer.cost;
+    buttons[3].disabled = gold < unitTypes.giant.cost;
+}
+
+// Draw background
+function drawBackground() {
+    // Sky
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#87CEEB');
+    gradient.addColorStop(0.5, '#E0F6FF');
+    gradient.addColorStop(0.5, '#90EE90');
+    gradient.addColorStop(1, '#228B22');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Ground line
+    ctx.strokeStyle = '#654321';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, groundY);
+    ctx.lineTo(canvas.width, groundY);
+    ctx.stroke();
+    
+    // Player base
+    ctx.fillStyle = '#4169E1';
+    ctx.fillRect(playerBaseX - 40, groundY - 80, 80, 80);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '40px Arial';
+    ctx.fillText('🏰', playerBaseX - 25, groundY - 30);
+    
+    // Enemy base
+    ctx.fillStyle = '#DC143C';
+    ctx.fillRect(enemyBaseX - 40, groundY - 80, 80, 80);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText('💀', enemyBaseX - 25, groundY - 30);
+    
+    // Gold mines
+    for (const mine of goldMines) {
+        if (mine.health > 0) {
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.arc(mine.x, mine.y, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#000000';
+            ctx.font = '20px Arial';
+            ctx.fillText('💰', mine.x - 10, mine.y + 7);
+            
+            // Mine health bar
+            const healthBarWidth = 60;
+            const healthPercent = mine.health / mine.maxHealth;
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(mine.x - healthBarWidth/2, mine.y - 45, healthBarWidth, 8);
+            ctx.fillStyle = '#00FF00';
+            ctx.fillRect(mine.x - healthBarWidth/2, mine.y - 45, healthBarWidth * healthPercent, 8);
+        }
+    }
+}
+
+// Game loop
+function gameLoop(currentTime) {
+    if (!gameRunning) return;
+    
+    const deltaTime = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw background
+    drawBackground();
+    
+    // Passive gold generation
+    gold += deltaTime * 2;
+    
+    // Spawn enemies
+    enemySpawnTimer += deltaTime * 1000;
+    if (enemySpawnTimer >= enemySpawnInterval) {
+        enemySpawnTimer = 0;
+        spawnEnemy();
+        // Decrease spawn interval over time
+        enemySpawnInterval = Math.max(2000, enemySpawnInterval - 50);
+    }
+    
+    // Update and draw player units
+    for (const unit of playerUnits) {
+        unit.update(deltaTime, currentTime);
+        unit.draw();
+        
+        // Archer shooting
+        if (unit.isRanged && unit.state === 'attack' && unit.target && unit.target.health > 0) {
+            if (currentTime - unit.lastAttack >= unit.attackCooldown / 2) {
+                projectiles.push(new Projectile(
+                    unit.x, 
+                    unit.y - unit.height/2, 
+                    unit.target.x, 
+                    unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
+                    unit.damage
+                ));
+                unit.lastAttack = currentTime;
+            }
+        }
+    }
+    
+    // Update and draw enemy units
+    for (const unit of enemyUnits) {
+        unit.update(deltaTime, currentTime);
+        unit.draw();
+    }
+    
+    // Update and draw projectiles
+    for (const projectile of projectiles) {
+        projectile.update(deltaTime);
+        projectile.draw();
+    }
+    
+    // Remove dead units
+    playerUnits = playerUnits.filter(u => u.health > 0);
+    enemyUnits = enemyUnits.filter(u => u.health > 0);
+    projectiles = projectiles.filter(p => p.active);
+    goldMines = goldMines.filter(m => m.health > 0);
+    
+    // Check win/lose conditions
+    if (baseHealth <= 0) {
+        gameOver(false);
+    } else if (enemyBaseHealth <= 0) {
+        gameOver(true);
+    }
+    
+    // Update UI
+    updateUI();
+    
+    requestAnimationFrame(gameLoop);
+}
+
+// Game over
+function gameOver(win) {
+    gameRunning = false;
+    const gameOverDiv = document.getElementById('gameOver');
+    const gameOverText = document.getElementById('gameOverText');
+    gameOverText.textContent = win ? '🎉 ПОБЕДА! 🎉' : '☠️ ПОРАЖЕНИЕ ☠️';
+    gameOverText.style.color = win ? '#00FF00' : '#FF0000';
+    gameOverDiv.style.display = 'block';
+}
+
+// Restart game
+function restartGame() {
+    gold = 100;
+    baseHealth = 1000;
+    enemyBaseHealth = 1000;
+    kills = 0;
+    playerUnits = [];
+    enemyUnits = [];
+    projectiles = [];
+    enemySpawnTimer = 0;
+    enemySpawnInterval = 5000;
+    gameRunning = true;
+    document.getElementById('gameOver').style.display = 'none';
+    initMines();
+    lastTime = performance.now();
+    requestAnimationFrame(gameLoop);
+}
+
+// Initialize game
+initMines();
+lastTime = performance.now();
+requestAnimationFrame(gameLoop);
