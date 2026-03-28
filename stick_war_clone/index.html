@@ -101,11 +101,27 @@
         <button class="unit-btn" onclick="spawnUnit('giant')">🗿 Гигант (300💰)</button>
     </div>
     
+    <div id="modeControls" style="position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px;">
+        <button id="defendBtn" class="unit-btn" onclick="setMode('defend')" style="background: #2196F3; border-color: #1976D2;">🛡️ Защита</button>
+        <button id="attackBtn" class="unit-btn" onclick="setMode('attack')" style="background: #f44336; border-color: #d32f2f;">⚔️ Атака</button>
+    </div>
+    
     <div id="gameOver">
         <h1 id="gameOverText">GAME OVER</h1>
         <button id="restartBtn" onclick="restartGame()">Играть снова</button>
     </div>
 
     <script src="game.js"></script>
+    <script>
+        // Mode toggle functions
+        function setMode(mode) {
+            gameMode = mode;
+            document.getElementById('defendBtn').style.background = mode === 'defend' ? '#2196F3' : '#9E9E9E';
+            document.getElementById('attackBtn').style.background = mode === 'attack' ? '#f44336' : '#9E9E9E';
+        }
+        
+        // Initialize button states
+        setMode('defend');
+    </script>
 </body>
 </html>

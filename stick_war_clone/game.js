@@ -75,11 +75,18 @@ const playerBaseX = 100;
 const enemyBaseX = canvas.width - 100;
 const groundY = canvas.height / 2 + 50;
 
-// Initialize gold mines
+// Game mode: 'defend' or 'attack'
+let gameMode = 'defend';
+
+// Initialize gold mines - closer to bases
 function initMines() {
     goldMines = [
-        { x: canvas.width / 2 - 50, y: groundY, health: 500, maxHealth: 500 },
-        { x: canvas.width / 2 + 50, y: groundY, health: 500, maxHealth: 500 }
+        // Player side mines (closer to player base)
+        { x: playerBaseX + 150, y: groundY, health: 300, maxHealth: 300, owner: 'player' },
+        { x: playerBaseX + 220, y: groundY - 30, health: 300, maxHealth: 300, owner: 'player' },
+        // Enemy side mines (closer to enemy base)
+        { x: enemyBaseX - 150, y: groundY, health: 300, maxHealth: 300, owner: 'enemy' },
+        { x: enemyBaseX - 220, y: groundY - 30, health: 300, maxHealth: 300, owner: 'enemy' }
     ];
 }
 
@@ -89,7 +96,7 @@ class Unit {
         const config = unitTypes[type];
         this.type = type;
         this.isPlayer = isPlayer;
-        this.x = isPlayer ? playerBaseX : enemyBaseX;
+        this.x = isPlayer ? playerBaseX + 60 : enemyBaseX - 60;
         this.y = groundY;
         this.health = config.health;
         this.maxHealth = config.health;
@@ -106,13 +113,22 @@ class Unit {
         this.target = null;
         this.state = 'move'; // move, attack, mine
         this.miningTarget = null;
+        this.defendPosition = isPlayer ? playerBaseX + 80 : enemyBaseX - 80;
     }
     
     update(deltaTime, currentTime) {
         if (this.health <= 0) return;
         
-        // Find target
-        this.findTarget();
+        // Miners automatically look for mines to mine
+        if (this.isWorker && !this.miningTarget) {
+            this.findMineToMine();
+        }
+        
+        // In defend mode, non-worker units stay near base
+        if (gameMode === 'defend' && !this.isWorker) {
+            this.defendBehavior(deltaTime, currentTime);
+            return;
+        }
         
         if (this.state === 'mine' && this.isWorker && this.miningTarget) {
             this.mine(currentTime);
@@ -129,6 +145,78 @@ class Unit {
         } else {
             this.state = 'move';
             this.move(deltaTime);
+        }
+    }
+    
+    defendBehavior(deltaTime, currentTime) {
+        // Stay near defend position, only attack enemies that come close
+        const defendX = this.isPlayer ? playerBaseX + 80 : enemyBaseX - 80;
+        const maxDistanceFromDefend = 150;
+        
+        // Find closest enemy
+        let closestEnemy = null;
+        let closestDist = Infinity;
+        
+        const enemyArray = this.isPlayer ? enemyUnits : playerUnits;
+        for (const enemy of enemyArray) {
+            if (enemy.health > 0) {
+                const dist = Math.abs(this.x - enemy.x);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestEnemy = enemy;
+                }
+            }
+        }
+        
+        // Only engage if enemy is within defend range
+        if (closestEnemy && closestDist < maxDistanceFromDefend) {
+            this.target = closestEnemy;
+            const distance = Math.abs(this.x - this.target.x);
+            
+            if (distance <= this.attackRange) {
+                this.state = 'attack';
+                this.attack(currentTime);
+            } else {
+                this.state = 'move';
+                const direction = this.target.x > this.x ? 1 : -1;
+                this.x += this.speed * direction * deltaTime;
+                // Clamp to defend area
+                if (this.isPlayer) {
+                    this.x = Math.max(playerBaseX + 50, Math.min(playerBaseX + maxDistanceFromDefend, this.x));
+                } else {
+                    this.x = Math.max(enemyBaseX - maxDistanceFromDefend, Math.min(enemyBaseX - 50, this.x));
+                }
+            }
+        } else {
+            // Return to defend position
+            this.state = 'move';
+            const distToPosition = Math.abs(this.x - defendX);
+            if (distToPosition > 10) {
+                const direction = defendX > this.x ? 1 : -1;
+                this.x += this.speed * direction * deltaTime;
+            }
+        }
+    }
+    
+    findMineToMine() {
+        if (!this.isPlayer) return; // Enemy miners not implemented
+        
+        let closestMine = null;
+        let closestDist = Infinity;
+        
+        for (const mine of goldMines) {
+            if (mine.health > 0 && mine.owner === 'player') {
+                const dist = Math.abs(this.x - mine.x);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestMine = mine;
+                }
+            }
+        }
+        
+        if (closestMine) {
+            this.miningTarget = closestMine;
+            this.state = 'mine';
         }
     }
     
@@ -188,11 +276,11 @@ class Unit {
         const direction = this.isPlayer ? 1 : -1;
         this.x += this.speed * direction * deltaTime;
         
-        // Clamp position
+        // Clamp position - units cannot go behind their own base
         if (this.isPlayer) {
-            this.x = Math.max(playerBaseX + 50, Math.min(canvas.width - 50, this.x));
+            this.x = Math.max(playerBaseX + 50, Math.min(enemyBaseX - 50, this.x));
         } else {
-            this.x = Math.max(50, Math.min(enemyBaseX - 50, this.x));
+            this.x = Math.max(playerBaseX + 50, Math.min(enemyBaseX - 50, this.x));
         }
     }
     
@@ -221,6 +309,7 @@ class Unit {
         if (!this.miningTarget || this.miningTarget.health <= 0) {
             this.state = 'move';
             this.miningTarget = null;
+            this.findMineToMine();
             return;
         }
         
@@ -231,14 +320,16 @@ class Unit {
                 this.miningTarget.health -= this.damage;
                 
                 if (this.miningTarget.health <= 0) {
-                    gold += 25;
+                    gold += 50; // Increased gold from mines
                     this.miningTarget = null;
                     this.state = 'move';
+                    // Find another mine to mine
+                    setTimeout(() => this.findMineToMine(), 100);
                 }
             }
         } else {
             const direction = this.miningTarget.x > this.x ? 1 : -1;
-            this.x += this.speed * direction * 0.016;
+            this.x += this.speed * direction * deltaTime;
         }
     }
     
@@ -395,9 +486,9 @@ function spawnUnit(type) {
     }
 }
 
-// Enemy spawn logic
+// Enemy spawn logic - slower spawn rate
 let enemySpawnTimer = 0;
-let enemySpawnInterval = 5000;
+let enemySpawnInterval = 10000; // Increased from 5000 to 10000ms
 
 function spawnEnemy() {
     const types = ['swordman', 'archer', 'giant'];
@@ -489,13 +580,13 @@ function gameLoop(currentTime) {
     // Passive gold generation
     gold += deltaTime * 2;
     
-    // Spawn enemies
+    // Spawn enemies - slower rate, less aggressive scaling
     enemySpawnTimer += deltaTime * 1000;
     if (enemySpawnTimer >= enemySpawnInterval) {
         enemySpawnTimer = 0;
         spawnEnemy();
-        // Decrease spawn interval over time
-        enemySpawnInterval = Math.max(2000, enemySpawnInterval - 50);
+        // Decrease spawn interval over time, but more slowly and with higher minimum
+        enemySpawnInterval = Math.max(6000, enemySpawnInterval - 20);
     }
     
     // Update and draw player units
@@ -569,7 +660,8 @@ function restartGame() {
     enemyUnits = [];
     projectiles = [];
     enemySpawnTimer = 0;
-    enemySpawnInterval = 5000;
+    enemySpawnInterval = 10000;
+    gameMode = 'defend';
     gameRunning = true;
     document.getElementById('gameOver').style.display = 'none';
     initMines();
