@@ -79,15 +79,15 @@ const groundY = canvas.height / 2 + 50;
 // Game mode: 'defend' or 'attack'
 let gameMode = 'defend';
 
-// Initialize gold mines - closer to bases
+// Initialize gold mines - closer to bases with increased health
 function initMines() {
     goldMines = [
         // Player side mines (closer to player base)
-        { x: playerBaseX + 150, y: groundY, health: 300, maxHealth: 300, owner: 'player' },
-        { x: playerBaseX + 220, y: groundY - 30, health: 300, maxHealth: 300, owner: 'player' },
+        { x: playerBaseX + 150, y: groundY, health: 2000, maxHealth: 2000, owner: 'player' },
+        { x: playerBaseX + 220, y: groundY - 30, health: 2000, maxHealth: 2000, owner: 'player' },
         // Enemy side mines (closer to enemy base)
-        { x: enemyBaseX - 150, y: groundY, health: 300, maxHealth: 300, owner: 'enemy' },
-        { x: enemyBaseX - 220, y: groundY - 30, health: 300, maxHealth: 300, owner: 'enemy' }
+        { x: enemyBaseX - 150, y: groundY, health: 2000, maxHealth: 2000, owner: 'enemy' },
+        { x: enemyBaseX - 220, y: groundY - 30, health: 2000, maxHealth: 2000, owner: 'enemy' }
     ];
 }
 
@@ -125,41 +125,56 @@ class Unit {
             this.findMineToMine();
         }
         
-        // In defend mode, non-worker units stay near base
-        if (gameMode === 'defend' && !this.isWorker) {
+        // In defend mode, player's non-worker units stay near base
+        // Enemy units have their own defend/attack logic based on unit count
+        if (this.isPlayer && gameMode === 'defend' && !this.isWorker) {
             this.defendBehavior(deltaTime, currentTime);
             return;
         }
         
+        // Enemy non-worker units: defend if less than 5 units, attack otherwise
+        if (!this.isPlayer && !this.isWorker) {
+            const enemyCombatUnits = enemyUnits.filter(u => !u.isWorker && u.health > 0).length;
+            if (enemyCombatUnits < 5) {
+                this.enemyDefendBehavior(deltaTime, currentTime);
+                return;
+            }
+            // Otherwise fall through to attack behavior
+        }
+        
         if (this.state === 'mine' && this.isWorker && this.miningTarget) {
             this.mine(currentTime, deltaTime);
-        } else if (this.target && this.target.health > 0) {
-            const distance = Math.abs(this.x - this.target.x);
+        } else {
+            // Always look for enemy units first, then base
+            this.findTarget();
             
-            if (distance <= this.attackRange) {
-                this.state = 'attack';
-                this.attack(currentTime);
+            if (this.target && this.target.health > 0) {
+                const distance = Math.abs(this.x - this.target.x);
+                
+                if (distance <= this.attackRange) {
+                    this.state = 'attack';
+                    this.attack(currentTime);
+                } else {
+                    this.state = 'move';
+                    this.move(deltaTime);
+                }
             } else {
                 this.state = 'move';
                 this.move(deltaTime);
             }
-        } else {
-            this.state = 'move';
-            this.move(deltaTime);
         }
     }
     
     defendBehavior(deltaTime, currentTime) {
         // Stay near defend position, only attack enemies that come close
-        const defendX = this.isPlayer ? playerBaseX + 80 : enemyBaseX - 80;
+        const defendX = playerBaseX + 80;
         const maxDistanceFromDefend = 150;
-        
-        // Find closest enemy
+
+        // Find closest enemy unit (prioritize units over base)
         let closestEnemy = null;
         let closestDist = Infinity;
-        
-        const enemyArray = this.isPlayer ? enemyUnits : playerUnits;
-        for (const enemy of enemyArray) {
+
+        for (const enemy of enemyUnits) {
             if (enemy.health > 0) {
                 const dist = Math.abs(this.x - enemy.x);
                 if (dist < closestDist) {
@@ -168,12 +183,12 @@ class Unit {
                 }
             }
         }
-        
+
         // Only engage if enemy is within defend range
         if (closestEnemy && closestDist < maxDistanceFromDefend) {
             this.target = closestEnemy;
             const distance = Math.abs(this.x - this.target.x);
-            
+
             if (distance <= this.attackRange) {
                 this.state = 'attack';
                 this.attack(currentTime);
@@ -182,11 +197,52 @@ class Unit {
                 const direction = this.target.x > this.x ? 1 : -1;
                 this.x += this.speed * direction * deltaTime;
                 // Clamp to defend area
-                if (this.isPlayer) {
-                    this.x = Math.max(playerBaseX + 50, Math.min(playerBaseX + maxDistanceFromDefend, this.x));
-                } else {
-                    this.x = Math.max(enemyBaseX - maxDistanceFromDefend, Math.min(enemyBaseX - 50, this.x));
+                this.x = Math.max(playerBaseX + 50, Math.min(playerBaseX + maxDistanceFromDefend, this.x));
+            }
+        } else {
+            // Return to defend position
+            this.state = 'move';
+            const distToPosition = Math.abs(this.x - defendX);
+            if (distToPosition > 10) {
+                const direction = defendX > this.x ? 1 : -1;
+                this.x += this.speed * direction * deltaTime;
+            }
+        }
+    }
+    
+    // Enemy defend behavior - stay near enemy base until 5 units
+    enemyDefendBehavior(deltaTime, currentTime) {
+        const defendX = enemyBaseX - 80;
+        const maxDistanceFromDefend = 150;
+
+        // Find closest player unit
+        let closestEnemy = null;
+        let closestDist = Infinity;
+
+        for (const player of playerUnits) {
+            if (player.health > 0) {
+                const dist = Math.abs(this.x - player.x);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestEnemy = player;
                 }
+            }
+        }
+
+        // Only engage if enemy is within defend range
+        if (closestEnemy && closestDist < maxDistanceFromDefend) {
+            this.target = closestEnemy;
+            const distance = Math.abs(this.x - this.target.x);
+
+            if (distance <= this.attackRange) {
+                this.state = 'attack';
+                this.attack(currentTime);
+            } else {
+                this.state = 'move';
+                const direction = this.target.x < this.x ? -1 : 1;
+                this.x += this.speed * direction * deltaTime;
+                // Clamp to defend area
+                this.x = Math.max(enemyBaseX - maxDistanceFromDefend, Math.min(enemyBaseX - 50, this.x));
             }
         } else {
             // Return to defend position
@@ -228,7 +284,7 @@ class Unit {
     
     findTarget() {
         if (this.isPlayer) {
-            // Target enemy units or enemy base
+            // Target enemy units FIRST (prioritize units over base)
             let closestEnemy = null;
             let closestDist = Infinity;
             
@@ -242,17 +298,18 @@ class Unit {
                 }
             }
             
-            // Also consider enemy base
+            // Only target base if no enemy units nearby or very close to base
             const baseDist = Math.abs(this.x - enemyBaseX);
-            if (baseDist < closestDist && baseDist < 400) {
-                this.target = { x: enemyBaseX, y: groundY, health: enemyBaseHealth, isBase: true };
-            } else if (closestEnemy) {
+            if (closestEnemy && closestDist < 500) {
+                // Always prioritize enemy units within range
                 this.target = closestEnemy;
-            } else {
+            } else if (baseDist < 400 || !closestEnemy) {
                 this.target = { x: enemyBaseX, y: groundY, health: enemyBaseHealth, isBase: true };
+            } else {
+                this.target = closestEnemy;
             }
         } else {
-            // Target player units or player base
+            // Target player units FIRST (prioritize units over base)
             let closestEnemy = null;
             let closestDist = Infinity;
             
@@ -266,14 +323,15 @@ class Unit {
                 }
             }
             
-            // Also consider player base
+            // Only target base if no enemy units nearby or very close to base
             const baseDist = Math.abs(this.x - playerBaseX);
-            if (baseDist < closestDist && baseDist < 400) {
-                this.target = { x: playerBaseX, y: groundY, health: baseHealth, isBase: true };
-            } else if (closestEnemy) {
+            if (closestEnemy && closestDist < 500) {
+                // Always prioritize enemy units within range
                 this.target = closestEnemy;
-            } else {
+            } else if (baseDist < 400 || !closestEnemy) {
                 this.target = { x: playerBaseX, y: groundY, health: baseHealth, isBase: true };
+            } else {
+                this.target = closestEnemy;
             }
         }
     }
