@@ -131,7 +131,7 @@ class Unit {
         }
         
         if (this.state === 'mine' && this.isWorker && this.miningTarget) {
-            this.mine(currentTime);
+            this.mine(currentTime, deltaTime);
         } else if (this.target && this.target.health > 0) {
             const distance = Math.abs(this.x - this.target.x);
             
@@ -305,7 +305,7 @@ class Unit {
         }
     }
     
-    mine(currentTime) {
+    mine(currentTime, deltaTime) {
         if (!this.miningTarget || this.miningTarget.health <= 0) {
             this.state = 'move';
             this.miningTarget = null;
@@ -336,6 +336,12 @@ class Unit {
     draw() {
         if (this.health <= 0) return;
         
+        // Debug: ensure position is valid
+        if (isNaN(this.x) || isNaN(this.y)) {
+            console.log('Invalid position for unit', this.type, this.x, this.y);
+            return;
+        }
+        
         ctx.save();
         
         // Draw stick figure
@@ -346,14 +352,15 @@ class Unit {
         const x = this.x;
         const y = this.y;
         
-        // Head
+        // Head - make it more visible
         ctx.beginPath();
-        ctx.arc(x, y - this.height/2 + 5, 8, 0, Math.PI * 2);
+        ctx.arc(x, y - this.height/2 + 5, 10, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
         
         // Body
         ctx.beginPath();
-        ctx.moveTo(x, y - this.height/2 + 13);
+        ctx.moveTo(x, y - this.height/2 + 15);
         ctx.lineTo(x, y - this.height/4);
         ctx.stroke();
         
@@ -370,12 +377,12 @@ class Unit {
         }
         ctx.stroke();
         
-        // Legs
+        // Legs - make them more visible
         ctx.beginPath();
         ctx.moveTo(x, y - this.height/4);
-        ctx.lineTo(x - 8, y);
+        ctx.lineTo(x - 10, y);
         ctx.moveTo(x, y - this.height/4);
-        ctx.lineTo(x + 8, y);
+        ctx.lineTo(x + 10, y);
         ctx.stroke();
         
         // Weapon
@@ -411,13 +418,16 @@ class Unit {
             ctx.stroke();
         }
         
-        // Health bar
+        // Health bar - make it more visible
         const healthBarWidth = 40;
         const healthPercent = this.health / this.maxHealth;
         ctx.fillStyle = '#FF0000';
-        ctx.fillRect(x - healthBarWidth/2, y - this.height/2 - 15, healthBarWidth, 5);
+        ctx.fillRect(x - healthBarWidth/2, y - this.height/2 - 20, healthBarWidth, 6);
         ctx.fillStyle = '#00FF00';
-        ctx.fillRect(x - healthBarWidth/2, y - this.height/2 - 15, healthBarWidth * healthPercent, 5);
+        ctx.fillRect(x - healthBarWidth/2, y - this.height/2 - 20, healthBarWidth * healthPercent, 6);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - healthBarWidth/2, y - this.height/2 - 20, healthBarWidth, 6);
         
         ctx.restore();
     }
@@ -523,11 +533,15 @@ function drawBackground() {
     
     // Ground line
     ctx.strokeStyle = '#654321';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(0, groundY);
     ctx.lineTo(canvas.width, groundY);
     ctx.stroke();
+    
+    // Ground fill
+    ctx.fillStyle = '#8B7355';
+    ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
     
     // Player base
     ctx.fillStyle = '#4169E1';
