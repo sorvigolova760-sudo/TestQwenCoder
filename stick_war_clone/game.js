@@ -98,7 +98,9 @@ class Unit {
         const config = unitTypes[type];
         this.type = type;
         this.isPlayer = isPlayer;
-        this.x = isPlayer ? playerBaseX + 60 : enemyBaseX - 60;
+        // Add random offset to prevent stacking
+        const randomOffset = (Math.random() - 0.5) * 40;
+        this.x = (isPlayer ? playerBaseX + 60 : enemyBaseX - 60) + randomOffset;
         this.y = groundY;
         this.health = config.health;
         this.maxHealth = config.health;
@@ -341,6 +343,21 @@ class Unit {
         const direction = this.isPlayer ? 1 : -1;
         this.x += this.speed * direction * deltaTime;
         
+        // Separation: push away from nearby units to prevent stacking
+        const separationRange = 30;
+        const separationForce = 50;
+        const unitsToCheck = this.isPlayer ? playerUnits : enemyUnits;
+        
+        for (const other of unitsToCheck) {
+            if (other !== this && other.health > 0) {
+                const dist = Math.abs(this.x - other.x);
+                if (dist < separationRange && dist > 0) {
+                    const pushDir = this.x > other.x ? 1 : -1;
+                    this.x += pushDir * separationForce * deltaTime;
+                }
+            }
+        }
+        
         // Clamp position - units cannot go behind their own base
         if (this.isPlayer) {
             this.x = Math.max(playerBaseX + 50, Math.min(enemyBaseX - 50, this.x));
@@ -549,6 +566,18 @@ class Projectile {
                     }
                 }
             }
+            // Also check if hitting enemy base
+            if (this.isPlayer) {
+                const baseDist = Math.sqrt(Math.pow(this.x - enemyBaseX, 2) + Math.pow(this.y - groundY, 2));
+                if (baseDist < 60) {
+                    enemyBaseHealth -= this.damage;
+                }
+            } else {
+                const baseDist = Math.sqrt(Math.pow(this.x - playerBaseX, 2) + Math.pow(this.y - groundY, 2));
+                if (baseDist < 60) {
+                    baseHealth -= this.damage;
+                }
+            }
         }
     }
     
@@ -642,6 +671,12 @@ function updateUI() {
     if (enemyGoldEl) {
         enemyGoldEl.textContent = Math.floor(enemyGold);
     }
+    
+    // Обновляем здоровье базы врага
+    const enemyBaseHealthEl = document.getElementById('enemyBaseHealthDisplay');
+    if (enemyBaseHealthEl) {
+        enemyBaseHealthEl.textContent = Math.max(0, Math.floor(enemyBaseHealth));
+    }
 }
 
 // Draw background
@@ -679,6 +714,14 @@ function drawBackground() {
     ctx.fillRect(enemyBaseX - 40, groundY - 80, 80, 80);
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText('💀', enemyBaseX - 25, groundY - 30);
+    
+    // Enemy base health bar
+    const enemyBaseHealthBarWidth = 100;
+    const enemyBaseHealthPercent = Math.max(0, enemyBaseHealth / 1000);
+    ctx.fillStyle = '#FF0000';
+    ctx.fillRect(enemyBaseX - enemyBaseHealthBarWidth/2, groundY - 95, enemyBaseHealthBarWidth, 10);
+    ctx.fillStyle = '#00FF00';
+    ctx.fillRect(enemyBaseX - enemyBaseHealthBarWidth/2, groundY - 95, enemyBaseHealthBarWidth * enemyBaseHealthPercent, 10);
     
     // Gold mines
     for (const mine of goldMines) {
@@ -740,17 +783,20 @@ function gameLoop(currentTime) {
         unit.draw();
         
         // Archer shooting
-        if (unit.isRanged && unit.state === 'attack' && unit.target && unit.target.health > 0) {
-            if (currentTime - unit.lastAttack >= unit.attackCooldown / 2) {
-                projectiles.push(new Projectile(
-                    unit.x, 
-                    unit.y - unit.height/2, 
-                    unit.target.x, 
-                    unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
-                    unit.damage,
-                    unit.isPlayer
-                ));
-                unit.lastAttack = currentTime;
+        if (unit.isRanged && unit.state === 'attack' && unit.target) {
+            const targetHasHealth = unit.target.isBase ? (unit.target.health > 0 || enemyBaseHealth > 0) : unit.target.health > 0;
+            if (targetHasHealth) {
+                if (currentTime - unit.lastAttack >= unit.attackCooldown / 2) {
+                    projectiles.push(new Projectile(
+                        unit.x, 
+                        unit.y - unit.height/2, 
+                        unit.target.x, 
+                        unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
+                        unit.damage,
+                        unit.isPlayer
+                    ));
+                    unit.lastAttack = currentTime;
+                }
             }
         }
     }
@@ -761,17 +807,20 @@ function gameLoop(currentTime) {
         unit.draw();
         
         // Enemy archer shooting
-        if (unit.isRanged && unit.state === 'attack' && unit.target && unit.target.health > 0) {
-            if (currentTime - unit.lastAttack >= unit.attackCooldown / 2) {
-                projectiles.push(new Projectile(
-                    unit.x, 
-                    unit.y - unit.height/2, 
-                    unit.target.x, 
-                    unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
-                    unit.damage,
-                    unit.isPlayer
-                ));
-                unit.lastAttack = currentTime;
+        if (unit.isRanged && unit.state === 'attack' && unit.target) {
+            const targetHasHealth = unit.target.isBase ? (unit.target.health > 0 || baseHealth > 0) : unit.target.health > 0;
+            if (targetHasHealth) {
+                if (currentTime - unit.lastAttack >= unit.attackCooldown / 2) {
+                    projectiles.push(new Projectile(
+                        unit.x, 
+                        unit.y - unit.height/2, 
+                        unit.target.x, 
+                        unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
+                        unit.damage,
+                        unit.isPlayer
+                    ));
+                    unit.lastAttack = currentTime;
+                }
             }
         }
     }
