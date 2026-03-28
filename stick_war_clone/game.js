@@ -61,7 +61,8 @@ const unitTypes = {
         color: '#8B4513',
         width: 40,
         height: 70,
-        isWorker: false
+        isWorker: false,
+        isRanged: false
     }
 };
 
@@ -506,7 +507,7 @@ class Unit {
 
 // Projectile class for ranged attacks
 class Projectile {
-    constructor(x, y, targetX, targetY, damage) {
+    constructor(x, y, targetX, targetY, damage, isPlayer) {
         this.x = x;
         this.y = y;
         this.targetX = targetX;
@@ -514,6 +515,7 @@ class Projectile {
         this.damage = damage;
         this.speed = 300;
         this.active = true;
+        this.isPlayer = isPlayer;
         
         const dx = targetX - x;
         const dy = targetY - y;
@@ -740,7 +742,8 @@ function gameLoop(currentTime) {
                     unit.y - unit.height/2, 
                     unit.target.x, 
                     unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
-                    unit.damage
+                    unit.damage,
+                    unit.isPlayer
                 ));
                 unit.lastAttack = currentTime;
             }
@@ -751,6 +754,21 @@ function gameLoop(currentTime) {
     for (const unit of enemyUnits) {
         unit.update(deltaTime, currentTime);
         unit.draw();
+        
+        // Enemy archer shooting
+        if (unit.isRanged && unit.state === 'attack' && unit.target && unit.target.health > 0) {
+            if (currentTime - unit.lastAttack >= unit.attackCooldown / 2) {
+                projectiles.push(new Projectile(
+                    unit.x, 
+                    unit.y - unit.height/2, 
+                    unit.target.x, 
+                    unit.target.y - (unit.target.isBase ? 40 : unit.target.height/2),
+                    unit.damage,
+                    unit.isPlayer
+                ));
+                unit.lastAttack = currentTime;
+            }
+        }
     }
     
     // Update and draw projectiles
