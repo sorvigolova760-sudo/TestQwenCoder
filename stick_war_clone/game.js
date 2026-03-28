@@ -341,22 +341,47 @@ class Unit {
     
     move(deltaTime) {
         const direction = this.isPlayer ? 1 : -1;
-        this.x += this.speed * direction * deltaTime;
         
-        // Separation: push away from nearby units to prevent stacking
-        const separationRange = 30;
-        const separationForce = 50;
-        const unitsToCheck = this.isPlayer ? playerUnits : enemyUnits;
+        // Separation: gently push away from ALL nearby units to prevent stacking
+        const minSpacing = 25; // Minimum distance between units
+        let separationX = 0;
         
-        for (const other of unitsToCheck) {
+        // Check all units (both friendly and enemy)
+        const allUnits = [...playerUnits, ...enemyUnits];
+        for (const other of allUnits) {
             if (other !== this && other.health > 0) {
-                const dist = Math.abs(this.x - other.x);
-                if (dist < separationRange && dist > 0) {
-                    const pushDir = this.x > other.x ? 1 : -1;
-                    this.x += pushDir * separationForce * deltaTime;
+                const dist = this.x - other.x;
+                const absDist = Math.abs(dist);
+                if (absDist < minSpacing && absDist > 0) {
+                    // Push away from other unit
+                    separationX += dist > 0 ? 1 : -1;
                 }
             }
         }
+        
+        // Avoid friendly miners that are blocking the path
+        let avoidMiner = 0;
+        const avoidDistance = 60; // Distance at which to start avoiding miners
+        const myUnits = this.isPlayer ? playerUnits : enemyUnits;
+        
+        for (const other of myUnits) {
+            if (other !== this && other.health > 0 && other.isWorker) {
+                const dist = this.x - other.x;
+                const absDist = Math.abs(dist);
+                // If miner is in front of us in the direction we're moving
+                if (absDist < avoidDistance && ((direction > 0 && dist < 0) || (direction < 0 && dist > 0))) {
+                    // Push away from miner
+                    avoidMiner += dist > 0 ? 0.8 : -0.8;
+                }
+            }
+        }
+        
+        // Apply movement with separation and miner avoidance
+        const moveSpeed = this.speed * deltaTime;
+        const separationStrength = 0.5; // How much separation affects movement
+        const avoidStrength = 0.8; // How much to avoid miners
+        
+        this.x += direction * moveSpeed + separationX * separationStrength + avoidMiner * avoidStrength;
         
         // Clamp position - units cannot go behind their own base
         if (this.isPlayer) {
