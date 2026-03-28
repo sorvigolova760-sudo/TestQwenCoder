@@ -350,6 +350,9 @@ class Unit {
     }
     
     attack(currentTime) {
+        // Ranged units don't do melee attacks
+        if (this.isRanged) return;
+        
         if (currentTime - this.lastAttack >= this.attackCooldown) {
             this.lastAttack = currentTime;
             
