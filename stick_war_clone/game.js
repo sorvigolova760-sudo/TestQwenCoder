@@ -539,7 +539,9 @@ class Projectile {
             for (const unit of this.isPlayer ? enemyUnits : playerUnits) {
                 if (unit.health > 0) {
                     const unitDist = Math.sqrt(Math.pow(this.x - unit.x, 2) + Math.pow(this.y - unit.y, 2));
-                    if (unitDist < 30) {
+                    // Use larger hit radius for bigger units (giants)
+                    const hitRadius = unit.width > 30 ? 50 : 30;
+                    if (unitDist < hitRadius) {
                         unit.health -= this.damage;
                         if (unit.health <= 0 && this.isPlayer) {
                             kills++;
