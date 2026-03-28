@@ -125,8 +125,9 @@ class Unit {
             this.findMineToMine();
         }
         
-        // In defend mode, non-worker units stay near base
-        if (gameMode === 'defend' && !this.isWorker) {
+        // In defend mode, player's non-worker units stay near base
+        // Enemy units always attack regardless of gameMode
+        if (this.isPlayer && gameMode === 'defend' && !this.isWorker) {
             this.defendBehavior(deltaTime, currentTime);
             return;
         }
@@ -151,15 +152,14 @@ class Unit {
     
     defendBehavior(deltaTime, currentTime) {
         // Stay near defend position, only attack enemies that come close
-        const defendX = this.isPlayer ? playerBaseX + 80 : enemyBaseX - 80;
+        const defendX = playerBaseX + 80;
         const maxDistanceFromDefend = 150;
-        
+
         // Find closest enemy
         let closestEnemy = null;
         let closestDist = Infinity;
-        
-        const enemyArray = this.isPlayer ? enemyUnits : playerUnits;
-        for (const enemy of enemyArray) {
+
+        for (const enemy of enemyUnits) {
             if (enemy.health > 0) {
                 const dist = Math.abs(this.x - enemy.x);
                 if (dist < closestDist) {
@@ -168,12 +168,12 @@ class Unit {
                 }
             }
         }
-        
+
         // Only engage if enemy is within defend range
         if (closestEnemy && closestDist < maxDistanceFromDefend) {
             this.target = closestEnemy;
             const distance = Math.abs(this.x - this.target.x);
-            
+
             if (distance <= this.attackRange) {
                 this.state = 'attack';
                 this.attack(currentTime);
@@ -182,11 +182,7 @@ class Unit {
                 const direction = this.target.x > this.x ? 1 : -1;
                 this.x += this.speed * direction * deltaTime;
                 // Clamp to defend area
-                if (this.isPlayer) {
-                    this.x = Math.max(playerBaseX + 50, Math.min(playerBaseX + maxDistanceFromDefend, this.x));
-                } else {
-                    this.x = Math.max(enemyBaseX - maxDistanceFromDefend, Math.min(enemyBaseX - 50, this.x));
-                }
+                this.x = Math.max(playerBaseX + 50, Math.min(playerBaseX + maxDistanceFromDefend, this.x));
             }
         } else {
             // Return to defend position
