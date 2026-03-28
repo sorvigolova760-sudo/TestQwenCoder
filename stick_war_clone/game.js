@@ -5,6 +5,7 @@ const ctx = canvas.getContext('2d');
 
 // Game state
 let gold = 100;
+let enemyGold = 100; // Золото противника
 let baseHealth = 1000;
 let enemyBaseHealth = 1000;
 let kills = 0;
@@ -199,17 +200,22 @@ class Unit {
     }
     
     findMineToMine() {
-        if (!this.isPlayer) return; // Enemy miners not implemented
-        
         let closestMine = null;
         let closestDist = Infinity;
         
         for (const mine of goldMines) {
-            if (mine.health > 0 && mine.owner === 'player') {
-                const dist = Math.abs(this.x - mine.x);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closestMine = mine;
+            if (mine.health > 0) {
+                // Шахтёры ищут шахты на своей стороне карты
+                const isOnMySide = this.isPlayer ? 
+                    mine.x < canvas.width / 2 : 
+                    mine.x > canvas.width / 2;
+                
+                if (isOnMySide && mine.owner === (this.isPlayer ? 'player' : 'enemy')) {
+                    const dist = Math.abs(this.x - mine.x);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestMine = mine;
+                    }
                 }
             }
         }
@@ -319,8 +325,15 @@ class Unit {
                 this.lastAttack = currentTime;
                 this.miningTarget.health -= this.damage;
                 
+                // Добыча золота каждый тик атаки
+                const goldMined = 5 * (this.attackCooldown / 1000); // 5 золота в секунду
+                if (this.isPlayer) {
+                    gold += goldMined;
+                } else {
+                    enemyGold += goldMined;
+                }
+                
                 if (this.miningTarget.health <= 0) {
-                    gold += 50; // Increased gold from mines
                     this.miningTarget = null;
                     this.state = 'move';
                     // Find another mine to mine
@@ -496,14 +509,54 @@ function spawnUnit(type) {
     }
 }
 
-// Enemy spawn logic - slower spawn rate
+// Enemy spawn logic - AI that mines gold and spawns units
 let enemySpawnTimer = 0;
-let enemySpawnInterval = 10000; // Increased from 5000 to 10000ms
+let enemySpawnInterval = 10000; // Initial spawn interval
 
 function spawnEnemy() {
     const types = ['swordman', 'archer', 'giant'];
     const randomType = types[Math.floor(Math.random() * types.length)];
     enemyUnits.push(new Unit(randomType, false));
+}
+
+// Вражеский ИИ: добыча золота и найм юнитов
+let enemyMinerSpawnTimer = 0;
+let enemyMinerSpawnInterval = 3000; // Спавн шахтёров каждые 3 секунды
+
+function updateEnemyAI(deltaTime) {
+    // Спавн шахтёров для добычи золота
+    enemyMinerSpawnTimer += deltaTime * 1000;
+    if (enemyMinerSpawnTimer >= enemyMinerSpawnInterval && enemyGold >= unitTypes.miner.cost) {
+        enemyMinerSpawnTimer = 0;
+        enemyGold -= unitTypes.miner.cost;
+        const miner = new Unit('miner', false);
+        miner.state = 'mine';
+        miner.findMineToMine();
+        enemyUnits.push(miner);
+    }
+    
+    // Найм боевых юнитов если накоплено достаточно золота
+    if (enemyGold >= unitTypes.swordman.cost) {
+        const combatTypes = ['swordman', 'archer', 'giant'];
+        const weights = [0.5, 0.35, 0.15]; // Вероятности выбора
+        
+        const rand = Math.random();
+        let selectedType = 'swordman';
+        let cumulative = 0;
+        
+        for (let i = 0; i < combatTypes.length; i++) {
+            cumulative += weights[i];
+            if (rand <= cumulative) {
+                selectedType = combatTypes[i];
+                break;
+            }
+        }
+        
+        if (enemyGold >= unitTypes[selectedType].cost) {
+            enemyGold -= unitTypes[selectedType].cost;
+            enemyUnits.push(new Unit(selectedType, false));
+        }
+    }
 }
 
 // Update UI
@@ -518,6 +571,12 @@ function updateUI() {
     buttons[1].disabled = gold < unitTypes.swordman.cost;
     buttons[2].disabled = gold < unitTypes.archer.cost;
     buttons[3].disabled = gold < unitTypes.giant.cost;
+    
+    // Обновляем золото противника (для отладки)
+    const enemyGoldEl = document.getElementById('enemyGold');
+    if (enemyGoldEl) {
+        enemyGoldEl.textContent = Math.floor(enemyGold);
+    }
 }
 
 // Draw background
@@ -594,11 +653,18 @@ function gameLoop(currentTime) {
     // Passive gold generation
     gold += deltaTime * 2;
     
-    // Spawn enemies - slower rate, less aggressive scaling
+    // Вражеский ИИ: добыча золота и найм юнитов
+    updateEnemyAI(deltaTime);
+    
+    // Spawn enemies - slower rate, less aggressive scaling (резервный механизм)
     enemySpawnTimer += deltaTime * 1000;
     if (enemySpawnTimer >= enemySpawnInterval) {
         enemySpawnTimer = 0;
-        spawnEnemy();
+        // Спавним только если у врага нет шахтёров или мало юнитов
+        const enemyMiners = enemyUnits.filter(u => u.type === 'miner' && u.health > 0).length;
+        if (enemyMiners === 0) {
+            spawnEnemy();
+        }
         // Decrease spawn interval over time, but more slowly and with higher minimum
         enemySpawnInterval = Math.max(6000, enemySpawnInterval - 20);
     }
